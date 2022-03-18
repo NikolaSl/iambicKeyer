@@ -1,9 +1,35 @@
+/*
+Iambic-A morse keyer and trainer  
+Licensed under the MIT License <http://opensource.org/licenses/MIT>.
+SPDX-License-Identifier: MIT
+Copyright (c) 2022 Nikola Slavchev LZ1NKL <slavchev@gmail.com>.
+Permission is hereby  granted, free of charge, to any  person obtaining a copy
+of this software and associated  documentation files (the "Software"), to deal
+in the Software  without restriction, including without  limitation the rights
+to  use, copy,  modify, merge,  publish, distribute,  sublicense, and/or  sell
+copies  of  the Software,  and  to  permit persons  to  whom  the Software  is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE  IS PROVIDED "AS  IS", WITHOUT WARRANTY  OF ANY KIND,  EXPRESS OR
+IMPLIED,  INCLUDING BUT  NOT  LIMITED TO  THE  WARRANTIES OF  MERCHANTABILITY,
+FITNESS FOR  A PARTICULAR PURPOSE AND  NONINFRINGEMENT. IN NO EVENT  SHALL THE
+AUTHORS  OR COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM,  DAMAGES OR  OTHER
+LIABILITY, WHETHER IN AN ACTION OF  CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
 #include <Arduino.h>
 
-#define WPM_SPEED 15
+#define WPM_SPEED 20
 #define WPM_MIN_SPEED 5
 #define WPM_MAX_SPEED 30
-#define TONE_FREQ 550
+#define TONE_FREQ 600
+#define DAH_IN_DITS 3
+#define GAP_IN_DITS 1
+#define MIN_CHAR_GAP_IN_DITS 2
+#define MIN_WORD_GAP_IN_DITS 7
 
 #define DIT_PADDLE_PIN 12
 #define DAH_PADDLE_PIN 13
@@ -16,16 +42,51 @@ enum Played {NONE=0, DOT=1, DASH=2};
 
 Played last;
 State state;
-uint32_t wpm;
-uint32_t ditMilliseconds;
-uint32_t dahMilliseconds;
-uint32_t gapMilliseconds;
+ulong wpm;
+ulong ditMilliseconds;
+ulong dahMilliseconds;
+ulong gapMilliseconds;
+ulong newCharMilliseconds;
+ulong newWordMilliseconds;
+
+void decodeMorse(Played played) {
+  const char morseTree[] =  " ETIANMSURWDKGOHVF*L*PJBXCYZQ**54*3***2&*+***'1"\
+    "6=/**^(*7***8*90*****$******?_****\"**.****@******-********;!*)*****,****:";
+  static ulong morseIndex = 0;
+  static ulong timeOfLastBeep = 0;
+  static bool lastSpace = false;
+  char decodedChar = 0x00;
+  if (played == NONE ) {
+    if (morseIndex && millis() - timeOfLastBeep > newCharMilliseconds) {
+      decodedChar = morseTree[morseIndex];
+      morseIndex = 0;
+    } else if (!lastSpace && millis() - timeOfLastBeep > newWordMilliseconds) {
+      decodedChar = morseTree[morseIndex];
+      lastSpace = true;
+    }
+  } else {
+    lastSpace = false;
+    morseIndex = 2*morseIndex + (played == DOT ? 1 : 2);
+    if (morseIndex > sizeof(morseTree)) {
+      decodedChar = '*';
+      morseIndex = 0;
+    }
+  }
+  if (decodedChar) {
+    Serial.print(decodedChar);
+  } else if (played != NONE) {
+    timeOfLastBeep = millis();
+  }
+}
 
 void setWordsPerMinute(uint32_t wordsPerMinute) {
+  Serial.printf("\nSwitch to %u words per minute.\n", wordsPerMinute);
   wpm = wordsPerMinute;
   ditMilliseconds = 1200/wpm;
-  dahMilliseconds = 3 * ditMilliseconds;
-  gapMilliseconds = ditMilliseconds;
+  dahMilliseconds = DAH_IN_DITS * ditMilliseconds;
+  gapMilliseconds = GAP_IN_DITS * ditMilliseconds;
+  newCharMilliseconds = (MIN_CHAR_GAP_IN_DITS - 1) * ditMilliseconds;
+  newWordMilliseconds = (MIN_WORD_GAP_IN_DITS - 1) * ditMilliseconds;
 }
 
 void IRAM_ATTR updatePaddles() {
@@ -88,6 +149,7 @@ void IRAM_ATTR updatePaddles() {
 }
 
 void setup() {
+  Serial.begin(115200);
   last = NONE;
   state = PAUSE;
   setWordsPerMinute(WPM_SPEED);
@@ -140,4 +202,5 @@ void loop() {
     case PAUSE:
       last = NONE;
   }
+  decodeMorse(last);
 }
