@@ -1,5 +1,5 @@
 /*
-Iambic-A morse keyer and trainer  
+iambicKeyer - Iambic-A morse code keyer, ecoder, decoder and trainer for ESP32
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
 SPDX-License-Identifier: MIT
 Copyright (c) 2022 Nikola Slavchev LZ1NKL <slavchev@gmail.com>.
@@ -25,7 +25,7 @@ SOFTWARE.
 #define WPM_SPEED 20
 #define WPM_MIN_SPEED 5
 #define WPM_MAX_SPEED 30
-#define TONE_FREQ 600
+#define TONE_FREQ 550
 #define DAH_IN_DITS 3
 #define GAP_IN_DITS 1
 #define MIN_CHAR_GAP_IN_DITS 2
@@ -49,25 +49,36 @@ ulong gapMilliseconds;
 ulong newCharMilliseconds;
 ulong newWordMilliseconds;
 
-void decodeMorse(Played played) {
-  const char morseTree[] =  " ETIANMSURWDKGOHVF*L*PJBXCYZQ**54*3***2&*+***'1"\
-    "6=/**^(*7***8*90*****$******?_****\"**.****@******-********;!*)*****,****:";
+const char MORSE_TREE[] =  " ETIANMSURWDKGOHVF*L*PJBXCYZQ**54*3***2&*+***'1"\
+  "6=/**^(*7***8*90*****$******?_****\"**.****@******-********;!*)*****,****:";
+
+void morsePlay(Played p) {
+  ledcWriteTone(0, TONE_FREQ);
+  digitalWrite(SWITCH_PIN, HIGH);
+  delay(p == DOT ? ditMilliseconds : dahMilliseconds);
+  digitalWrite(SWITCH_PIN, LOW);
+  ledcWriteTone(0, 0);
+  delay(gapMilliseconds);
+  last = p;
+}
+
+void morseDecode(Played played) {
   static ulong morseIndex = 0;
   static ulong timeOfLastBeep = 0;
   static bool lastSpace = false;
   char decodedChar = 0x00;
   if (played == NONE ) {
     if (morseIndex && millis() - timeOfLastBeep > newCharMilliseconds) {
-      decodedChar = morseTree[morseIndex];
+      decodedChar = MORSE_TREE[morseIndex];
       morseIndex = 0;
     } else if (!lastSpace && millis() - timeOfLastBeep > newWordMilliseconds) {
-      decodedChar = morseTree[morseIndex];
+      decodedChar = MORSE_TREE[morseIndex];
       lastSpace = true;
     }
   } else {
     lastSpace = false;
     morseIndex = 2*morseIndex + (played == DOT ? 1 : 2);
-    if (morseIndex > sizeof(morseTree)) {
+    if (morseIndex > sizeof(MORSE_TREE)) {
       decodedChar = '*';
       morseIndex = 0;
     }
@@ -77,6 +88,33 @@ void decodeMorse(Played played) {
   } else if (played != NONE) {
     timeOfLastBeep = millis();
   }
+}
+
+void morsePlayChar(char ch) {
+  ch = toUpperCase(ch);
+  Serial.print(ch);
+  uint morseIndex = 0;
+  while (morseIndex < sizeof(MORSE_TREE) && MORSE_TREE[morseIndex] != ch) 
+    morseIndex++;
+  if (morseIndex < sizeof(MORSE_TREE)) {
+    char morseSequence = 0;
+    uint morseSequenceCount = 0;
+    while (morseIndex) {
+      morseSequence = (morseSequence << 1) | (1 - (morseIndex & 1));
+      morseIndex = (morseIndex + (morseIndex & 1) - 2) >> 1;
+      morseSequenceCount++;
+    }
+    delay(morseSequenceCount ? newCharMilliseconds :newWordMilliseconds);
+    while (morseSequenceCount--) {
+      morsePlay(morseSequence & 1 ? DASH : DOT);
+      morseSequence >>= 1;
+    }
+  }
+}
+
+void morsePlayString(const char* text) {
+  for (uint index=0; text[index]; index++)
+    morsePlayChar(text[index]);
 }
 
 void setWordsPerMinute(uint32_t wordsPerMinute) {
@@ -101,33 +139,21 @@ void IRAM_ATTR updatePaddles() {
     switch (state) {
       case PAUSE:
         if (dit == LOW) {
-          if (dah == LOW) {
-            state = DITDAH;
-          } else {
-            state = DIT;
-          }
+          state = dah == LOW ? DITDAH : DIT;
         } else if (dah == LOW) {
           state = DAH;
         }
         break;
       case DIT:
         if (dah == LOW) {
-          if (dit == LOW) {
-            state = DITDAH;
-          } else {
-            state = DAH;
-          }
+          state = dit == LOW ? DITDAH : DAH;
         } else if (dit == HIGH) {
           state = PAUSE;
         }
         break;
       case DAH:
         if (dit == LOW) {
-          if (dah == LOW) {
-            state = DAHDIT;
-          } else {
-            state = DIT;
-          }
+          state = dah == LOW ? DAHDIT : DIT;
         } else if (dah == HIGH) {
           state = PAUSE;
         }
@@ -135,11 +161,7 @@ void IRAM_ATTR updatePaddles() {
       case DITDAH:
       case DAHDIT:
         if (dit == HIGH) {
-          if (dah == HIGH) {
-            state = PAUSE;
-          } else {
-            state = DAH;
-          }
+          state = dah == HIGH ? PAUSE : DAH;
         } else if (dah == HIGH) {
           state = DIT;
         }
@@ -163,20 +185,6 @@ void setup() {
   attachInterrupt(DAH_PADDLE_PIN, updatePaddles, CHANGE);
 }
 
-void morsePlay(Played p) {
-  ledcWriteTone(0, TONE_FREQ);
-  digitalWrite(SWITCH_PIN, HIGH);
-  if (p == DOT) {
-      delay(ditMilliseconds);
-  } else {
-      delay(dahMilliseconds);
-  }
-  digitalWrite(SWITCH_PIN, LOW);
-  ledcWriteTone(0, 0);
-  delay(gapMilliseconds);
-  last = p;
-}
-
 void loop() {
   switch (state) {
     case DIT:
@@ -188,11 +196,7 @@ void loop() {
     case DITDAH:
     case DAHDIT:
       if (last == NONE) {
-        if (state == DITDAH) {
-          morsePlay(DOT);
-        } else {
-          morsePlay(DASH);
-        }
+        morsePlay(state == DITDAH ? DOT : DASH);
       } else if (last == DOT) {
         morsePlay(DASH);
       } else {
@@ -202,5 +206,7 @@ void loop() {
     case PAUSE:
       last = NONE;
   }
-  decodeMorse(last);
+  morseDecode(last);
+  if (Serial.available())
+    morsePlayString(Serial.readString().c_str());
 }
