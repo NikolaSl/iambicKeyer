@@ -28,6 +28,7 @@ SOFTWARE.
 #define TONE_FREQ 550
 #define DAH_IN_DITS 3
 #define GAP_IN_DITS 1
+#define CHAR_GAP_IN_DITS 3
 #define MIN_CHAR_GAP_IN_DITS 2
 #define MIN_WORD_GAP_IN_DITS 7
 
@@ -46,6 +47,7 @@ ulong wpm;
 ulong ditMilliseconds;
 ulong dahMilliseconds;
 ulong gapMilliseconds;
+ulong charGapMilliseconds;
 ulong newCharMilliseconds;
 ulong newWordMilliseconds;
 
@@ -104,7 +106,7 @@ void morsePlayChar(char ch) {
       morseIndex = (morseIndex + (morseIndex & 1) - 2) >> 1;
       morseSequenceCount++;
     }
-    delay(morseSequenceCount ? newCharMilliseconds :newWordMilliseconds);
+    delay(morseSequenceCount ? charGapMilliseconds : newWordMilliseconds);
     while (morseSequenceCount--) {
       morsePlay(morseSequence & 1 ? DASH : DOT);
       morseSequence >>= 1;
@@ -123,6 +125,7 @@ void setWordsPerMinute(uint32_t wordsPerMinute) {
   ditMilliseconds = 1200/wpm;
   dahMilliseconds = DAH_IN_DITS * ditMilliseconds;
   gapMilliseconds = GAP_IN_DITS * ditMilliseconds;
+  charGapMilliseconds = CHAR_GAP_IN_DITS * ditMilliseconds;
   newCharMilliseconds = (MIN_CHAR_GAP_IN_DITS - 1) * ditMilliseconds;
   newWordMilliseconds = (MIN_WORD_GAP_IN_DITS - 1) * ditMilliseconds;
 }
