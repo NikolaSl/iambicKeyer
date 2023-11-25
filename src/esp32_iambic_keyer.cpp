@@ -21,6 +21,8 @@ SOFTWARE.
 */
 
 #include <Arduino.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
 #define WPM_SPEED 20
 #define WPM_MIN_SPEED 5
@@ -41,6 +43,8 @@ SOFTWARE.
 enum State {PAUSE=0, DIT=1, DAH=2, DITDAH=3, DAHDIT=4};
 enum Played {NONE=0, DOT=1, DASH=2};
 
+LiquidCrystal_I2C* lcd;
+
 Played last;
 State state;
 ulong wpm;
@@ -53,6 +57,19 @@ ulong newWordMilliseconds;
 
 const char MORSE_TREE[] =  " ETIANMSURWDKGOHVF*L*PJBXCYZQ**54*3***2&*+***'1"\
   "6=/**^(*7***8*90*****$******?_****\"**.****@******-********;!*)*****,****:";
+
+void charLCD(char a) {
+  static uint8_t pos = 0;
+  static uint32_t lastWpm = 0;
+  if (wpm != lastWpm) {
+    lcd->setCursor(0, 0);
+    lcd->printf("CW WPM: %02u", wpm);
+    lastWpm = wpm;
+  }
+  lcd->setCursor(pos++, 1);
+  pos &= 0xF;
+  lcd->print(a);
+}
 
 void morsePlay(Played p) {
   ledcWriteTone(0, TONE_FREQ);
@@ -87,6 +104,7 @@ void morseDecode(Played played) {
   }
   if (decodedChar) {
     Serial.print(decodedChar);
+    charLCD(decodedChar);
   } else if (played != NONE) {
     timeOfLastBeep = millis();
   }
@@ -173,8 +191,47 @@ void IRAM_ATTR updatePaddles() {
   }
 }
 
+void findI2Cdevice()
+{
+  byte error, address;
+  int Devices;
+  Serial.println("Scanning...");
+  Devices = 0;
+  Wire.begin();
+  for(address = 1; address < 127; address++ )
+  {
+    Wire.beginTransmission(address);
+    error = Wire.endTransmission();
+    if (error == 0)
+    {
+      Serial.print("I2C device found at address 0x");
+      if (address<16)
+        Serial.print("0");
+        Serial.print(address,HEX);
+        Serial.println("  !");
+        Devices++;
+      }
+      else if (error==4)
+      {
+      Serial.print("Unknown error at address 0x");
+      if (address<16)
+        Serial.print("0");
+        Serial.println(address,HEX);
+      }
+  }
+  if (Devices == 0)
+    Serial.println("No I2C devices found\n");
+  else
+    Serial.println("done\n");          
+}
+
 void setup() {
   Serial.begin(115200);
+  findI2Cdevice();
+  lcd = new LiquidCrystal_I2C(0x27, 16, 2);
+  lcd->init();
+  lcd->backlight();
+  lcd->cursor_on();
   last = NONE;
   state = PAUSE;
   setWordsPerMinute(WPM_SPEED);
